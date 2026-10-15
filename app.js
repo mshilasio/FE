@@ -197,6 +197,43 @@ const FT = (() => {
   }
   const newId = () => 'M-' + Date.now().toString(36).toUpperCase() + Math.random().toString(36).slice(2, 5).toUpperCase();
 
+/* ---------- Bank SMS parsing (Standard Chartered) ---------- */
+function parseBank(raw) {
+    return raw.split(/\n+/).map(s => s.replace(/\s+/g, ' ').trim()).filter(Boolean).map(parseBankOne).filter(Boolean);
+}
+function parseBankOne(msg) {
+    let amount = 0, recipient = '', date = todayISO(), time = '', method = 'Bank', balance = 0, account = '';
+    // Pattern 1: Card transaction - "a transaction of KES X was made on card ending Y at MERCHANT on DATE"
+    let m = msg.match(/transaction\s+of\s+(?:KES|Ksh)\s?([\d,]+(?:\.\d+)?)\s+was\s+made\s+on\s+card\s+ending\s+(\d+)\s+at\s+(.+?)\s+on\s+(\d{4}-\d{2}-\d{2}|\d{1,2}\/\d{1,2}\/\d{2,4})/i);
+    if (m) {
+        amount = num(m[1]); account = 'card ending ' + m[2]; recipient = m[3].trim().replace(/\.$/, ''); method = 'Card';
+        date = m[4].includes('-') ? m[4] : (m[4].split('/')[2].length === 2 ? '20' : '') + m[4].split('/')[2] + '-' + pad(m[4].split('/')[1]) + '-' + pad(m[4].split('/')[0]);
+    } else {
+        // Pattern 2: PesaLink/transfer - "KES X sent to RECIPIENT A/C ****XXXX"
+        m = msg.match(/(?:KES|Ksh)\s?([\d,]+(?:\.\d+)?)\s+sent\s+to\s+(.+?)(?:\s+A\/C\s+\*+\d+|\s*\.|$)/i);
+        if (m) {
+            amount = num(m[1]); recipient = m[2].trim(); method = 'Bank transfer';
+            const dm = msg.match(/(\d{1,2})\/(\d{1,2})\/(\d{2,4})|(\d{4}-\d{2}-\d{2})/);
+            if (dm) date = dm[4] || ((dm[3].length === 2 ? '20' : '') + dm[3] + '-' + pad(dm[2]) + '-' + pad(dm[1]));
+        } else return null;
+    }
+    // Balance if present
+    const bm = msg.match(/(?:balance|bal)\s*:?\s*(?:KES|Ksh)?\s?([\d,]+(?:\.\d+)?)/i);
+    if (bm) balance = num(bm[1]);
+    // Time if present
+    const tm = msg.match(/at\s+(\d{1,2}):(\d{2})\s*([AP]M)?/i);
+    if (tm) { let h = parseInt(tm[1], 10) % 12; if (tm[3] && tm[3].toUpperCase() === 'PM') h += 12; time = pad(h) + ':' + tm[2]; }
+    // Purpose from brackets at end (same convention as M-PESA)
+    let purpose = '';
+    const pm = msg.match(/\(([^()]+)\)\s*$/);
+    if (pm) purpose = pm[1].trim();
+    const id = 'B-' + Date.now().toString(36).toUpperCase() + Math.random().toString(36).slice(2, 5).toUpperCase();
+    const t = { id, date, time, amount, cost: 0, balance, recipient, account, purpose, category: '', paidBy: user(), method };
+    t.category = suggest(t);
+    return t;
+}
+
+
   /* ---------- UI helpers ---------- */
   function catOptions(sel) {
     const groups = {}; config.categories.forEach(c => { const g = c.group || 'Other'; (groups[g] = groups[g] || []).push(c.name); });
@@ -228,7 +265,7 @@ const FT = (() => {
   return {
     esc, fmt, num, todayISO, sleep, clone, DEFAULT_CONFIG,
     all: () => tx, config: () => config, conn, setConn, user, setUser,
-    refresh, add, update, remove, saveConfig, learn, suggest, parseMpesa, newId,
+    refresh, add, update, remove, saveConfig, learn, suggest, parseMpesa, parseBank, newId,
     catOptions, peopleOptions, header, csv, download, url, post
   };
 })();

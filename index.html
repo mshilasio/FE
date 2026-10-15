@@ -15,15 +15,18 @@
 
   <div class="card">
     <div class="tabs">
-      <button class="tab active" data-tab="paste">Paste M-PESA</button>
+      <button class="tab active" data-tab="paste">Paste M-PESA / Bank SMS</button>
       <button class="tab" data-tab="manual">Add manually</button>
     </div>
 
     <div id="tab-paste">
-      <span class="lbl">Paste M-PESA messages (one or many)</span>
+      <span class="lbl">Paste M-PESA or bank SMS messages (one or many)</span>
       <textarea id="raw" rows="7" placeholder="UJDE1AM1LQ Confirmed. Ksh3,000.00 paid to RIDGEWAYS TOTAL on 13/10/26 at 10:27 AM. New M-PESA balance is Ksh9,972.50. Transaction cost, Ksh16.50. ... (Fuel for school run)
 
-Tip: put the purpose in brackets at the end of the message, like the example."></textarea>
+Or paste a bank SMS:
+Dear Client, a transaction of KES 5,472.08 was made on card ending 4584 at APPLE COM BILL on 2026-10-10 ... (iCloud subscription)
+
+Tip: put the purpose in brackets at the end of any message."></textarea>
       <div class="btn-row">
         <button class="btn-primary" id="parseBtn">Read messages</button>
         <button class="btn-secondary" id="fileBtn">Upload .txt</button>
@@ -88,8 +91,8 @@ fillPeople();
 $('parseBtn').onclick = () => {
   const raw = $('raw').value.trim();
   if (!raw) return status('status', 'Paste at least one M-PESA message first.', 'error');
-  const got = FT.parseMpesa(raw);
-  if (!got.length) return status('status', 'Could not read any transactions. Check that the message starts with the M-PESA code and "Confirmed".', 'error');
+  const got = FT.parseMpesa(raw).concat(FT.parseBank(raw));
+  if (!got.length) return status('status', 'Could not read any transactions. For M-PESA, make sure the message starts with the code and "Confirmed". For bank SMS, make sure each message is on its own line.', 'error');
   const have = new Set(FT.all().map(t => t.id)), seen = new Set(pending.map(t => t.id));
   const fresh = got.filter(t => !have.has(t.id) && !seen.has(t.id));
   const dup = got.length - fresh.length;
