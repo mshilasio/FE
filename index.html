@@ -1,0 +1,190 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Family Expenses – Add</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=Space+Grotesk:wght@400;500;600;700&family=JetBrains+Mono:wght@400;500;600&display=swap" rel="stylesheet">
+<link rel="stylesheet" href="style.css">
+</head>
+<body>
+<div class="container">
+  <div id="hdr"></div>
+
+  <div class="card">
+    <div class="tabs">
+      <button class="tab active" data-tab="paste">Paste M-PESA</button>
+      <button class="tab" data-tab="manual">Add manually</button>
+    </div>
+
+    <div id="tab-paste">
+      <span class="lbl">Paste M-PESA messages (one or many)</span>
+      <textarea id="raw" rows="7" placeholder="UJDE1AM1LQ Confirmed. Ksh3,000.00 paid to RIDGEWAYS TOTAL on 13/10/26 at 10:27 AM. New M-PESA balance is Ksh9,972.50. Transaction cost, Ksh16.50. ... (Fuel for school run)
+
+Tip: put the purpose in brackets at the end of the message, like the example."></textarea>
+      <div class="btn-row">
+        <button class="btn-primary" id="parseBtn">Read messages</button>
+        <button class="btn-secondary" id="fileBtn">Upload .txt</button>
+        <button class="btn-secondary" id="clearBtn">Clear</button>
+        <input type="file" id="file" accept=".txt,.csv,text/plain" hidden>
+      </div>
+    </div>
+
+    <div id="tab-manual" hidden>
+      <div class="grid2">
+        <div class="field-group"><label for="m_date">Date</label><input type="date" id="m_date"></div>
+        <div class="field-group"><label for="m_amount">Amount (Ksh)</label><input type="number" id="m_amount" inputmode="decimal" step="0.01" placeholder="0.00"></div>
+        <div class="field-group full"><label for="m_recipient">Paid to / item</label><input id="m_recipient" placeholder="e.g. Naivas Karen, Cash to gardener"></div>
+        <div class="field-group full"><label for="m_purpose">Purpose</label><input id="m_purpose" placeholder="What was it for?"></div>
+        <div class="field-group"><label for="m_method">Paid with</label><select id="m_method"><option>Cash</option><option>M-PESA</option><option>Card</option><option>Bank transfer</option></select></div>
+        <div class="field-group"><label for="m_paidBy">Paid by</label><select id="m_paidBy"></select></div>
+      </div>
+      <div class="btn-row"><button class="btn-primary" id="addManualBtn">Add to list</button></div>
+    </div>
+    <div class="status-bar" id="status"></div>
+  </div>
+
+  <div class="card" id="review" hidden>
+    <h2>Review &amp; categorise <span class="lbl" id="count" style="display:inline;margin-left:8px"></span></h2>
+    <div class="tx-list" id="list"></div>
+    <label class="check"><input type="checkbox" id="learn" checked> Remember these categories for next time (by recipient)</label>
+    <div class="btn-row">
+      <button class="btn-primary" id="submitBtn">Save transactions</button>
+      <button class="btn-secondary" id="discardBtn">Discard</button>
+    </div>
+    <div class="status-bar" id="status2"></div>
+  </div>
+
+  <div class="card">
+    <h2>Latest entries</h2>
+    <div id="recent"></div>
+    <div class="btn-row"><a class="nav-btn" href="dashboard.html" style="padding:10px 16px">Open dashboard →</a></div>
+  </div>
+
+  <div class="footer">Family Expenses · your data stays in your own Google Sheet</div>
+</div>
+
+<script src="app.js"></script>
+<script>
+const $ = id => document.getElementById(id);
+let pending = [];
+FT.header('index.html');
+
+function status(id, msg, type) { const b = $(id); b.textContent = msg; b.className = 'status-bar show ' + type; }
+function hide(id) { $(id).className = 'status-bar'; }
+
+/* tabs */
+document.querySelectorAll('.tab').forEach(b => b.onclick = () => {
+  document.querySelectorAll('.tab').forEach(x => x.classList.toggle('active', x === b));
+  $('tab-paste').hidden = b.dataset.tab !== 'paste'; $('tab-manual').hidden = b.dataset.tab !== 'manual';
+});
+$('m_date').value = FT.todayISO();
+function fillPeople() { $('m_paidBy').innerHTML = FT.peopleOptions(FT.user()); }
+fillPeople();
+
+/* input */
+$('parseBtn').onclick = () => {
+  const raw = $('raw').value.trim();
+  if (!raw) return status('status', 'Paste at least one M-PESA message first.', 'error');
+  const got = FT.parseMpesa(raw);
+  if (!got.length) return status('status', 'Could not read any transactions. Check that the message starts with the M-PESA code and "Confirmed".', 'error');
+  const have = new Set(FT.all().map(t => t.id)), seen = new Set(pending.map(t => t.id));
+  const fresh = got.filter(t => !have.has(t.id) && !seen.has(t.id));
+  const dup = got.length - fresh.length;
+  pending = pending.concat(fresh); $('raw').value = '';
+  render();
+  status('status', fresh.length + ' read' + (dup ? ', ' + dup + ' already saved (skipped)' : '') + '. Review below.', fresh.length ? 'success' : 'error');
+};
+$('clearBtn').onclick = () => { $('raw').value = ''; hide('status'); };
+$('fileBtn').onclick = () => $('file').click();
+$('file').onchange = e => { const f = e.target.files[0]; if (!f) return; f.text().then(t => { $('raw').value = t; $('parseBtn').click(); }); e.target.value = ''; };
+
+$('addManualBtn').onclick = () => {
+  const amount = FT.num($('m_amount').value), recipient = $('m_recipient').value.trim();
+  if (!amount || !recipient) return status('status', 'Enter an amount and who/what it was paid to.', 'error');
+  const t = { id: FT.newId(), date: $('m_date').value || FT.todayISO(), time: '', amount, cost: 0, balance: 0, recipient, account: '',
+    purpose: $('m_purpose').value.trim(), category: '', paidBy: $('m_paidBy').value, method: $('m_method').value };
+  t.category = FT.suggest(t);
+  pending.push(t); render();
+  $('m_amount').value = ''; $('m_recipient').value = ''; $('m_purpose').value = '';
+  status('status', 'Added to the list below.', 'success');
+};
+
+/* review list */
+function render() {
+  $('review').hidden = !pending.length;
+  $('count').textContent = pending.length + ' to save';
+  $('list').innerHTML = pending.map((t, i) => `
+    <div class="tx-card ${t.category ? '' : 'needs'}" data-i="${i}">
+      <button class="tx-remove" data-act="rm" title="Remove">&times;</button>
+      <div class="tx-top"><span class="tx-code">${FT.esc(t.id.startsWith('M-') ? t.method : t.id)}${t.time ? ' · ' + FT.esc(t.time) : ''}${t.cost ? ' · fee ' + FT.fmt(t.cost, 2) : ''}</span><span class="tx-amount">${FT.fmt(t.amount, 2)}</span></div>
+      <div class="grid2">
+        <div class="field-group"><label>Paid to</label><input data-f="recipient" value="${FT.esc(t.recipient)}"></div>
+        <div class="field-group"><label>Date</label><input type="date" data-f="date" value="${FT.esc(t.date)}"></div>
+        <div class="field-group full"><label>Purpose</label><input data-f="purpose" value="${FT.esc(t.purpose)}" placeholder="What was it for?"></div>
+        <div class="field-group"><label>Category</label><select data-f="category">${FT.catOptions(t.category)}</select></div>
+        <div class="field-group"><label>Paid by</label><select data-f="paidBy">${FT.peopleOptions(t.paidBy)}</select></div>
+      </div>
+    </div>`).join('');
+  const missing = pending.filter(t => !t.category).length;
+  if (missing) status('status2', missing + ' still need a category (they will be saved as "Uncategorised").', 'loading'); else hide('status2');
+}
+$('list').addEventListener('input', e => {
+  const el = e.target, card = el.closest('.tx-card'); if (!card || !el.dataset.f) return;
+  const t = pending[+card.dataset.i], f = el.dataset.f;
+  t[f] = el.value;
+  if ((f === 'purpose' || f === 'recipient') && !t._manual) {
+    t.category = FT.suggest(t);
+    const sel = card.querySelector('[data-f=category]'); sel.innerHTML = FT.catOptions(t.category);
+    card.classList.toggle('needs', !t.category);
+  }
+});
+$('list').addEventListener('change', e => {
+  const el = e.target, card = el.closest('.tx-card'); if (!card || el.dataset.f !== 'category') return;
+  const t = pending[+card.dataset.i]; t.category = el.value; t._manual = true; card.classList.toggle('needs', !t.category);
+  const missing = pending.filter(x => !x.category).length;
+  if (missing) status('status2', missing + ' still need a category (they will be saved as "Uncategorised").', 'loading'); else hide('status2');
+});
+$('list').addEventListener('click', e => {
+  const b = e.target.closest('[data-act=rm]'); if (!b) return;
+  pending.splice(+b.closest('.tx-card').dataset.i, 1); render();
+});
+$('discardBtn').onclick = () => { pending = []; render(); hide('status'); };
+
+$('submitBtn').onclick = async () => {
+  if (!pending.length) return;
+  $('submitBtn').disabled = true;
+  status('status2', 'Saving…', 'loading');
+  const list = pending.map(t => { const o = Object.assign({}, t); delete o._manual; o.category = o.category || 'Uncategorised'; o.addedBy = FT.user(); o.addedAt = new Date().toISOString(); return o; });
+  try {
+    if ($('learn').checked) await FT.learn(list);
+    const r = await FT.add(list);
+    let msg = r.added + ' saved' + (r.dup ? ', ' + r.dup + ' duplicate(s) skipped' : '') + '.';
+    if (FT.conn()) {
+      await FT.sleep(2200);
+      try {
+        await FT.refresh();
+        const have = new Set(FT.all().map(t => t.id));
+        if (!r.ids.every(id => have.has(id))) msg += ' (Sent to the sheet – it may take a few seconds to show up.)';
+        else msg += ' Synced to the shared sheet ✓';
+      } catch (err) { msg += ' Sent, but could not confirm: ' + err.message; }
+    } else msg += ' Saved on this device only – connect the sheet in Settings to share with Selma.';
+    pending = []; render(); status('status', msg, 'success'); window.scrollTo({ top: 0, behavior: 'smooth' });
+    recent();
+  } catch (err) { status('status2', 'Failed: ' + err.message, 'error'); }
+  $('submitBtn').disabled = false;
+};
+
+function recent() {
+  const rows = FT.all().slice().sort((a, b) => (b.date + b.time).localeCompare(a.date + a.time)).slice(0, 8);
+  $('recent').innerHTML = rows.length ? `<div class="ledger-wrap"><table class="ledger-table"><tbody>` + rows.map(t => `<tr>
+    <td>${FT.esc(t.recipient)}<div class="sub">${FT.esc(t.date)} · ${FT.esc(t.category || 'Uncategorised')}${t.purpose ? ' · ' + FT.esc(t.purpose) : ''}</div></td>
+    <td class="amt">${FT.fmt(t.amount + t.cost)}</td></tr>`).join('') + `</tbody></table></div>` : '<div class="empty">Nothing saved yet.</div>';
+}
+recent();
+FT.refresh().then(() => { fillPeople(); recent(); FT.header('index.html'); }).catch(() => {});
+</script>
+</body>
+</html>

@@ -1,0 +1,169 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Family Expenses – Dashboard</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=Space+Grotesk:wght@400;500;600;700&family=JetBrains+Mono:wght@400;500;600&display=swap" rel="stylesheet">
+<link rel="stylesheet" href="style.css">
+</head>
+<body>
+<div class="container">
+  <div id="hdr"></div>
+  <div class="filter-row"><select id="period" aria-label="Period"></select><button class="btn-secondary btn-sm" id="reload">↻ Refresh</button></div>
+  <div id="alert"></div>
+  <div class="stats-grid" id="stats"></div>
+
+  <div class="card"><h3>Month by month</h3><div class="trend" id="trend"></div></div>
+  <div class="card"><h3>Where the money goes <span style="text-transform:none;letter-spacing:0">· tap a row to filter the ledger · white tick = budget</span></h3><div class="bars" id="cats"></div></div>
+  <div class="card two-col">
+    <div><h3>Who paid</h3><div class="bars" id="who"></div></div>
+    <div><h3>Top recipients</h3><div class="bars" id="rec"></div></div>
+  </div>
+
+  <div class="card">
+    <h3>Ledger</h3>
+    <div class="filter-row"><input id="q" placeholder="Search recipient or purpose…"><select id="catf"></select></div>
+    <div class="ledger-wrap"><table class="ledger-table">
+      <thead><tr><th>Date</th><th>Paid to / purpose</th><th style="text-align:right">Ksh</th><th>Category</th><th></th></tr></thead>
+      <tbody id="ledger"></tbody></table></div>
+    <div class="btn-row"><button class="btn-secondary btn-sm" id="more" hidden>Show more</button><button class="btn-secondary btn-sm" id="export">Export CSV</button></div>
+  </div>
+  <div class="footer">Family Expenses · amounts include M-PESA fees</div>
+</div>
+
+<script src="app.js"></script>
+<script>
+const $ = id => document.getElementById(id), E = FT.esc, F = FT.fmt;
+FT.header('dashboard.html');
+let period = null, catFilter = '', query = '', shown = 50;
+
+const mKey = (y, m) => y + '-' + String(m).padStart(2, '0');
+function addMonths(key, n) { const [y, m] = key.split('-').map(Number); const d = new Date(y, m - 1 + n, 1); return mKey(d.getFullYear(), d.getMonth() + 1); }
+const mLabel = (key, long) => { const [y, m] = key.split('-').map(Number); return new Date(y, m - 1, 1).toLocaleString('en-GB', { month: long ? 'long' : 'short', year: long ? 'numeric' : undefined }); };
+const compact = n => n >= 1e6 ? (n / 1e6).toFixed(1) + 'M' : n >= 1000 ? Math.round(n / 1000) + 'k' : String(Math.round(n));
+const spend = t => t.amount + t.cost;
+const months = () => [...new Set(FT.all().map(t => t.date.slice(0, 7)).filter(Boolean))].sort();
+const nowKey = () => FT.todayISO().slice(0, 7);
+
+function inPeriod(t) {
+  if (period === 'all') return true;
+  const anchor = months().slice(-1)[0] || nowKey();
+  if (period === 'last3') return t.date.slice(0, 7) >= addMonths(anchor, -2);
+  return t.date.startsWith(period);
+}
+function monthSpan(list) {
+  if (period !== 'all') return period === 'last3' ? 3 : 1;
+  const ms = [...new Set(list.map(t => t.date.slice(0, 7)))].sort(); if (!ms.length) return 1;
+  const [y1, m1] = ms[0].split('-').map(Number), [y2, m2] = ms[ms.length - 1].split('-').map(Number);
+  return (y2 - y1) * 12 + (m2 - m1) + 1;
+}
+
+function buildPeriodSelect() {
+  const ms = months().reverse();
+  if (!period) period = ms[0] || nowKey();
+  const opts = ms.map(m => `<option value="${m}">${mLabel(m, true)}</option>`);
+  if (!ms.includes(period) && period.length === 7) opts.unshift(`<option value="${period}">${mLabel(period, true)}</option>`);
+  opts.push('<option value="last3">Last 3 months</option>', '<option value="all">All time</option>');
+  $('period').innerHTML = opts.join(''); $('period').value = period;
+}
+
+function barRows(rows, max, onClickAttr) {
+  return rows.map(r => {
+    const pct = max ? Math.max(r.value / max * 100, 0) : 0;
+    const cls = r.budget ? (r.value > r.budget ? 'over' : r.value > r.budget * .85 ? 'warn' : '') : '';
+    return `<div class="${onClickAttr ? 'clickable' : ''}" ${onClickAttr ? `data-cat="${E(r.name)}"` : ''}>
+      <div class="bar-top"><span class="bar-name">${E(r.name)}</span><span class="bar-val">${F(r.value)}${r.budget ? ` <small>/ ${F(r.budget)} · ${Math.round(r.value / r.budget * 100)}%</small>` : ''}</span></div>
+      <div class="bar-track"><div class="bar-fill ${cls}" style="width:${pct}%"></div>${r.budget ? `<div class="bar-budget" style="left:${Math.min(r.budget / max * 100, 100)}%"></div>` : ''}</div></div>`;
+  }).join('');
+}
+const sumBy = (list, key) => { const m = {}; list.forEach(t => { const k = key(t); m[k] = (m[k] || 0) + spend(t); }); return m; };
+
+function render() {
+  const cfg = FT.config(), all = FT.all(), list = all.filter(inPeriod), total = list.reduce((s, t) => s + spend(t), 0), fees = list.reduce((s, t) => s + t.cost, 0);
+  const span = monthSpan(list), budgets = {}; cfg.categories.forEach(c => budgets[c.name] = (c.budget || 0) * span);
+
+  const byCat = sumBy(list, t => t.category || 'Uncategorised');
+  const topCat = Object.entries(byCat).sort((a, b) => b[1] - a[1])[0];
+  let delta = '';
+  if (period.length === 7) {
+    const prev = all.filter(t => t.date.startsWith(addMonths(period, -1))).reduce((s, t) => s + spend(t), 0);
+    if (prev > 0) { const p = Math.round((total - prev) / prev * 100); delta = `<span class="${p > 0 ? 'up' : 'down'}">${p > 0 ? '▲' : '▼'} ${Math.abs(p)}%</span> vs ${mLabel(addMonths(period, -1))}`; }
+  }
+  $('stats').innerHTML = `
+    <div class="stat-box hero"><label>Total spent</label><div class="val"><small>Ksh</small> ${F(total)}</div><div class="sub">${delta || (list.length + ' transactions')}</div></div>
+    <div class="stat-box"><label>Transactions</label><div class="val">${list.length}</div></div>
+    <div class="stat-box"><label>Biggest</label><div class="val" style="font-size:13px">${topCat ? E(topCat[0]) : '–'}</div><div class="sub">${topCat ? 'Ksh ' + F(topCat[1]) : ''}</div></div>
+    <div class="stat-box"><label>M-PESA fees</label><div class="val"><small>Ksh</small> ${F(fees)}</div></div>`;
+
+  const unc = list.filter(t => !t.category || t.category === 'Uncategorised').length;
+  $('alert').innerHTML = unc ? `<div class="alert" id="uncBtn">${unc} transaction${unc > 1 ? 's need' : ' needs'} a category – tap to fix them</div>` : '';
+  if (unc) $('uncBtn').onclick = () => { catFilter = 'Uncategorised'; $('catf').value = catFilter; shown = 50; renderLedger(); $('ledger').scrollIntoView({ behavior: 'smooth' }); };
+
+  /* trend */
+  const ms = months(); let tm = ms.slice(-12);
+  if (!tm.length) tm = [nowKey()];
+  const tot = Object.fromEntries(tm.map(m => [m, all.filter(t => t.date.startsWith(m)).reduce((s, t) => s + spend(t), 0)]));
+  const mx = Math.max(...Object.values(tot), 1);
+  $('trend').innerHTML = tm.map(m => `<div class="trend-col ${m === period ? 'sel' : ''}" data-m="${m}"><div class="trend-val">${compact(tot[m])}</div><div class="trend-bar" style="height:${tot[m] / mx * 100 * .78}%"></div><div class="trend-lbl">${mLabel(m)}</div></div>`).join('');
+
+  /* categories */
+  const names = new Set(Object.keys(byCat)); cfg.categories.forEach(c => { if (c.budget) names.add(c.name); });
+  const rows = [...names].map(n => ({ name: n, value: byCat[n] || 0, budget: budgets[n] || 0 })).sort((a, b) => b.value - a.value || b.budget - a.budget);
+  const cmax = Math.max(...rows.map(r => Math.max(r.value, r.budget)), 1);
+  $('cats').innerHTML = rows.length ? barRows(rows, cmax, true) : '<div class="empty">No transactions in this period.</div>';
+
+  const who = Object.entries(sumBy(list, t => t.paidBy || 'Unknown')).sort((a, b) => b[1] - a[1]).map(([name, value]) => ({ name, value }));
+  $('who').innerHTML = who.length ? barRows(who, who[0].value) : '<div class="empty">–</div>';
+  const rec = Object.entries(sumBy(list, t => t.recipient || '–')).sort((a, b) => b[1] - a[1]).slice(0, 8).map(([name, value]) => ({ name, value }));
+  $('rec').innerHTML = rec.length ? barRows(rec, rec[0].value) : '<div class="empty">–</div>';
+
+  const cats = [...new Set(cfg.categories.map(c => c.name).concat(Object.keys(byCat)))];
+  $('catf').innerHTML = '<option value="">All categories</option>' + cats.map(c => `<option ${c === catFilter ? 'selected' : ''}>${E(c)}</option>`).join('');
+  renderLedger();
+}
+
+function ledgerList() {
+  const q = query.toLowerCase();
+  return FT.all().filter(inPeriod).filter(t => !catFilter || (catFilter === 'Uncategorised' ? (!t.category || t.category === 'Uncategorised') : t.category === catFilter))
+    .filter(t => !q || (t.recipient + ' ' + t.purpose + ' ' + t.account).toLowerCase().includes(q))
+    .sort((a, b) => (b.date + b.time).localeCompare(a.date + a.time));
+}
+function renderLedger() {
+  const rows = ledgerList();
+  $('ledger').innerHTML = rows.length ? rows.slice(0, shown).map(t => `<tr data-id="${E(t.id)}">
+    <td style="white-space:nowrap">${E(t.date.slice(5).split('-').reverse().join('/'))}<div class="sub">${E(t.paidBy)}</div></td>
+    <td>${E(t.recipient)}<div class="sub">${E(t.purpose) || '–'}</div></td>
+    <td class="amt">${F(t.amount)}${t.cost ? `<div class="sub">+${F(t.cost, 2)}</div>` : ''}</td>
+    <td><select data-act="cat">${FT.catOptions(t.category || '')}</select></td>
+    <td><button class="del" data-act="del" title="Delete">&times;</button></td></tr>`).join('') : '<tr><td colspan="5" class="empty">Nothing matches.</td></tr>';
+  $('more').hidden = rows.length <= shown;
+}
+
+$('period').onchange = e => { period = e.target.value; catFilter = ''; shown = 50; render(); };
+$('trend').addEventListener('click', e => { const c = e.target.closest('[data-m]'); if (!c) return; period = c.dataset.m; buildPeriodSelect(); catFilter = ''; render(); });
+$('cats').addEventListener('click', e => { const c = e.target.closest('[data-cat]'); if (!c) return; catFilter = catFilter === c.dataset.cat ? '' : c.dataset.cat; $('catf').value = catFilter; shown = 50; renderLedger(); $('ledger').scrollIntoView({ behavior: 'smooth' }); });
+$('catf').onchange = e => { catFilter = e.target.value; shown = 50; renderLedger(); };
+$('q').oninput = e => { query = e.target.value; shown = 50; renderLedger(); };
+$('more').onclick = () => { shown += 50; renderLedger(); };
+$('export').onclick = () => FT.download('family-expenses-' + FT.todayISO() + '.csv', FT.csv(ledgerList()));
+$('ledger').addEventListener('change', async e => {
+  if (e.target.dataset.act !== 'cat') return;
+  await FT.update(e.target.closest('tr').dataset.id, { category: e.target.value }); render();
+});
+$('ledger').addEventListener('click', async e => {
+  const b = e.target.closest('[data-act=del]'); if (!b) return;
+  if (!confirm('Delete this transaction?')) return;
+  await FT.remove(b.closest('tr').dataset.id); buildPeriodSelect(); render();
+});
+async function load() {
+  try { await FT.refresh(); } catch (err) { $('alert').innerHTML = `<div class="alert">Could not reach the shared sheet (${E(err.message)}). Showing the copy saved on this device.</div>`; }
+  buildPeriodSelect(); render();
+}
+$('reload').onclick = load;
+buildPeriodSelect(); render(); load();
+</script>
+</body>
+</html>

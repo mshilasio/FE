@@ -1,0 +1,134 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Family Expenses – Settings</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=Space+Grotesk:wght@400;500;600;700&family=JetBrains+Mono:wght@400;500;600&display=swap" rel="stylesheet">
+<link rel="stylesheet" href="style.css">
+</head>
+<body>
+<div class="container">
+  <div id="hdr"></div>
+
+  <div class="card">
+    <h2>Shared sheet connection</h2>
+    <div class="grid2">
+      <div class="field-group full"><label for="url">Apps Script web app URL (ends in /exec)</label><input id="url" placeholder="https://script.google.com/macros/s/…/exec"></div>
+      <div class="field-group"><label for="key">Passcode</label><input id="key" type="password" autocomplete="off" placeholder="The SECRET you set in the script"></div>
+      <div class="field-group"><label for="me">This device is used by</label><select id="me"></select></div>
+    </div>
+    <div class="btn-row">
+      <button class="btn-primary" id="saveConn">Save &amp; test</button>
+      <button class="btn-secondary" id="copyLink">Copy setup link for another person</button>
+    </div>
+    <div class="status-bar" id="s1"></div>
+    <p class="note">Open the setup link on Selma's phone once and it connects automatically – the passcode travels in the part of the link after <b>#</b>, which is never sent to GitHub.</p>
+  </div>
+
+  <div class="card">
+    <h2>People</h2>
+    <input id="people" placeholder="Mshila, Selma">
+    <p class="note">Comma-separated. These appear in the "Paid by" list.</p>
+  </div>
+
+  <div class="card">
+    <h2>Categories &amp; monthly budgets</h2>
+    <div id="cats"></div>
+    <h3 style="margin-top:18px">Add a category</h3>
+    <div class="row-edit"><input id="nc_name" placeholder="Name"><select id="nc_group"><option>Kids</option><option>Home</option><option>Lifestyle</option><option>Other</option></select><input id="nc_budget" type="number" placeholder="Budget"><span></span></div>
+    <div class="btn-row"><button class="btn-secondary btn-sm" id="addCat">Add category</button></div>
+    <p class="note">Budget is per month (leave 0 for none). Removing a category does not change old transactions.</p>
+  </div>
+
+  <div class="card">
+    <h2>Auto-categorising rules</h2>
+    <p class="note" style="margin:0 0 12px">If a recipient, account or purpose <b>contains</b> the words on the left, it is suggested the category on the right. Your own words in "Purpose" win over the recipient. New rules are learned automatically when you save transactions.</p>
+    <input id="ruleFilter" placeholder="Filter rules…" style="margin-bottom:12px">
+    <div id="rules"></div>
+    <h3 style="margin-top:18px">Add a rule</h3>
+    <div class="row-edit"><input id="nr_match" placeholder="e.g. naivas"><select id="nr_cat"></select><span></span><span></span></div>
+    <div class="btn-row"><button class="btn-secondary btn-sm" id="addRule">Add rule</button></div>
+  </div>
+
+  <div class="btn-row" style="margin-bottom:16px"><button class="btn-primary" id="saveAll">Save categories, people &amp; rules</button></div>
+  <div class="status-bar" id="s2" style="margin-bottom:16px"></div>
+
+  <div class="card">
+    <h2>Data</h2>
+    <div class="btn-row" style="margin-top:0"><button class="btn-secondary btn-sm" id="exp">Download everything (CSV)</button><button class="btn-danger btn-sm" id="clr">Clear this device's copy</button></div>
+    <p class="note">Clearing only removes the copy in this browser; the shared sheet is untouched.</p>
+  </div>
+</div>
+
+<script src="app.js"></script>
+<script>
+const $ = id => document.getElementById(id), E = FT.esc;
+FT.header('settings.html');
+let cfg = FT.clone(FT.config());
+const st = (id, m, t) => { const b = $(id); b.textContent = m; b.className = 'status-bar show ' + t; };
+
+const c0 = FT.conn(); if (c0) { $('url').value = c0.url; $('key').value = c0.key; }
+function fillMe() { $('me').innerHTML = FT.peopleOptions(FT.user()); }
+fillMe(); $('me').onchange = () => FT.setUser($('me').value);
+
+$('saveConn').onclick = async () => {
+  const url = $('url').value.trim(); FT.setUser($('me').value);
+  if (!url) { FT.setConn(''); FT.header('settings.html'); return st('s1', 'Disconnected. Data now stays on this device only.', 'success'); }
+  FT.setConn(url, $('key').value); st('s1', 'Testing…', 'loading');
+  try {
+    await FT.refresh(); cfg = FT.clone(FT.config()); draw(); FT.header('settings.html');
+    st('s1', 'Connected ✓  ' + FT.all().length + ' transactions in the shared sheet.', 'success');
+  } catch (e) { st('s1', 'Could not connect: ' + e.message + '. Check the URL, the passcode, and that the web app is deployed to "Anyone".', 'error'); }
+};
+$('copyLink').onclick = async () => {
+  const c = FT.conn(); if (!c) return st('s1', 'Save the connection first.', 'error');
+  const other = cfg.people.find(p => p !== FT.user()) || '';
+  const link = location.origin + location.pathname.replace('settings.html', 'index.html') + '#u=' + encodeURIComponent(c.url) + '&k=' + encodeURIComponent(c.key) + (other ? '&n=' + encodeURIComponent(other) : '');
+  try { await navigator.clipboard.writeText(link); st('s1', 'Link copied' + (other ? ' (it sets the device up as ' + other + ')' : '') + '. Send it privately, e.g. on WhatsApp.', 'success'); }
+  catch (e) { prompt('Copy this link:', link); }
+};
+
+function draw() {
+  $('people').value = cfg.people.join(', ');
+  $('cats').innerHTML = cfg.categories.map((c, i) => `<div class="row-edit" data-i="${i}"><span class="nm">${E(c.name)}</span>
+    <select data-k="group">${['Kids', 'Home', 'Lifestyle', 'Other'].map(g => `<option ${g === c.group ? 'selected' : ''}>${g}</option>`).join('')}</select>
+    <input type="number" data-k="budget" value="${c.budget || 0}"><button class="btn-danger btn-sm" data-act="delcat" title="Remove">&times;</button></div>`).join('');
+  $('nr_cat').innerHTML = FT.catOptions('x').replace(/<option selected>x<\/option>/, '');
+  drawRules();
+}
+function drawRules() {
+  const f = $('ruleFilter').value.toLowerCase();
+  const rows = cfg.rules.map((r, i) => ({ r, i })).filter(x => !f || (x.r.match + x.r.category).toLowerCase().includes(f));
+  $('rules').innerHTML = rows.slice(0, 150).map(({ r, i }) => `<div class="row-edit" data-i="${i}"><span class="nm">${E(r.match)}</span>
+    <select data-k="rcat">${cfg.categories.map(c => `<option ${c.name === r.category ? 'selected' : ''}>${E(c.name)}</option>`).join('')}</select><span></span>
+    <button class="btn-danger btn-sm" data-act="delrule" title="Remove">&times;</button></div>`).join('') + (rows.length > 150 ? '<p class="note">Showing 150 – use the filter.</p>' : '');
+}
+$('ruleFilter').oninput = drawRules;
+$('cats').addEventListener('change', e => { const row = e.target.closest('.row-edit'), c = cfg.categories[+row.dataset.i], k = e.target.dataset.k; c[k] = k === 'budget' ? (parseFloat(e.target.value) || 0) : e.target.value; });
+$('cats').addEventListener('click', e => { if (e.target.dataset.act !== 'delcat') return; const i = +e.target.closest('.row-edit').dataset.i; if (confirm('Remove "' + cfg.categories[i].name + '"?')) { cfg.categories.splice(i, 1); draw(); } });
+$('rules').addEventListener('change', e => { if (e.target.dataset.k === 'rcat') cfg.rules[+e.target.closest('.row-edit').dataset.i].category = e.target.value; });
+$('rules').addEventListener('click', e => { if (e.target.dataset.act !== 'delrule') return; cfg.rules.splice(+e.target.closest('.row-edit').dataset.i, 1); drawRules(); });
+$('addCat').onclick = () => {
+  const name = $('nc_name').value.trim(); if (!name) return;
+  if (cfg.categories.some(c => c.name.toLowerCase() === name.toLowerCase())) return st('s2', 'That category already exists.', 'error');
+  cfg.categories.push({ name, group: $('nc_group').value, budget: parseFloat($('nc_budget').value) || 0 });
+  $('nc_name').value = ''; $('nc_budget').value = ''; draw();
+};
+$('addRule').onclick = () => {
+  const m = $('nr_match').value.trim().toLowerCase(), c = $('nr_cat').value; if (!m || !c) return;
+  const ex = cfg.rules.find(r => r.match.toLowerCase() === m); if (ex) ex.category = c; else cfg.rules.push({ match: m, category: c });
+  $('nr_match').value = ''; drawRules();
+};
+$('saveAll').onclick = async () => {
+  cfg.people = $('people').value.split(',').map(s => s.trim()).filter(Boolean); if (!cfg.people.length) cfg.people = ['Mshila', 'Selma'];
+  await FT.saveConfig(cfg); fillMe(); st('s2', 'Saved' + (FT.conn() ? ' and shared with everyone using the sheet.' : ' on this device.'), 'success');
+};
+$('exp').onclick = () => FT.download('family-expenses-all.csv', FT.csv(FT.all()));
+$('clr').onclick = () => { if (confirm('Clear the copy stored in this browser?')) { ['ft_tx', 'ft_cfg'].forEach(k => localStorage.removeItem(k)); location.reload(); } };
+draw();
+</script>
+</body>
+</html>
