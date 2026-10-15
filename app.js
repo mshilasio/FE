@@ -67,7 +67,7 @@ const FT = (() => {
     if (!location.hash || location.hash.length < 3) return;
     try {
       const p = new URLSearchParams(location.hash.slice(1));
-      if (p.get('u') && p.get('k')) jset(K.conn, { url: p.get('u'), key: p.get('k') });
+      if (p.get('u')) jset(K.conn, { url: p.get('u') });
       if (p.get('n')) jset(K.user, p.get('n'));
       history.replaceState(null, '', location.pathname + location.search);
     } catch (e) {}
@@ -83,7 +83,7 @@ const FT = (() => {
   const conn = () => { const c = jget(K.conn, null); return c && c.url ? c : null; };
   const user = () => jget(K.user, '') || config.people[0];
   const setUser = n => jset(K.user, n);
-  const setConn = (url, key) => { if (url) jset(K.conn, { url: url.trim(), key: (key || '').trim() }); else localStorage.removeItem(K.conn); };
+  const setConn = url => { if (url) jset(K.conn, { url: url.trim() }); else localStorage.removeItem(K.conn); };
 
   const normTx = t => ({
     id: String(t.id || ''), date: String(t.date || '').slice(0, 10), time: String(t.time || '').slice(0, 5),
@@ -96,18 +96,18 @@ const FT = (() => {
 
   const save = () => { jset(K.tx, tx); jset(K.cfg, config); };
 
-  function url(c, extra) { return c.url + (c.url.includes('?') ? '&' : '?') + 'key=' + encodeURIComponent(c.key) + (extra || ''); }
+  function url(c, extra) { return c.url + (c.url.includes('?') ? '&' : '?') + 't=' + Date.now() + (extra || ''); }
 
   async function post(body) {
     const c = conn(); if (!c) return;
-    await fetch(c.url, { method: 'POST', mode: 'no-cors', headers: { 'Content-Type': 'text/plain;charset=utf-8' }, body: JSON.stringify(Object.assign({ key: c.key }, body)) });
+    await fetch(c.url, { method: 'POST', mode: 'no-cors', headers: { 'Content-Type': 'text/plain;charset=utf-8' }, body: JSON.stringify(body) });
   }
 
   async function refresh() {
     const c = conn(); if (!c) return { local: true };
-    const r = await fetch(url(c, '&t=' + Date.now()));
+    const r = await fetch(url(c));
     const d = await r.json();
-    if (!d.ok) throw new Error(d.error || 'The sheet refused the request (check the passcode)');
+    if (!d.ok) throw new Error(d.error || 'The sheet refused the request ');
     const server = (d.transactions || []).map(normTx);
     const ids = new Set(server.map(t => t.id));
     const keep = tx.filter(t => t._p && Date.now() - t._p < 5 * 60 * 1000 && !ids.has(t.id)); // just-added, not yet visible

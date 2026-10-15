@@ -17,7 +17,6 @@
     <h2>Shared sheet connection</h2>
     <div class="grid2">
       <div class="field-group full"><label for="url">Apps Script web app URL (ends in /exec)</label><input id="url" placeholder="https://script.google.com/macros/s/…/exec"></div>
-      <div class="field-group"><label for="key">Passcode</label><input id="key" type="password" autocomplete="off" placeholder="The SECRET you set in the script"></div>
       <div class="field-group"><label for="me">This device is used by</label><select id="me"></select></div>
     </div>
     <div class="btn-row">
@@ -25,7 +24,7 @@
       <button class="btn-secondary" id="copyLink">Copy setup link for another person</button>
     </div>
     <div class="status-bar" id="s1"></div>
-    <p class="note">Open the setup link on Selma's phone once and it connects automatically – the passcode travels in the part of the link after <b>#</b>, which is never sent to GitHub.</p>
+    <p class="note">Open the setup link on Selma's phone once and it connects automatically – the sheet address travels in the part of the link after <b>#</b>, which is never sent to GitHub. Only share it with people you trust: anyone with that link can see and add to your expenses.</p>
   </div>
 
   <div class="card">
@@ -70,23 +69,23 @@ FT.header('settings.html');
 let cfg = FT.clone(FT.config());
 const st = (id, m, t) => { const b = $(id); b.textContent = m; b.className = 'status-bar show ' + t; };
 
-const c0 = FT.conn(); if (c0) { $('url').value = c0.url; $('key').value = c0.key; }
+const c0 = FT.conn(); if (c0) $('url').value = c0.url;
 function fillMe() { $('me').innerHTML = FT.peopleOptions(FT.user()); }
 fillMe(); $('me').onchange = () => FT.setUser($('me').value);
 
 $('saveConn').onclick = async () => {
   const url = $('url').value.trim(); FT.setUser($('me').value);
   if (!url) { FT.setConn(''); FT.header('settings.html'); return st('s1', 'Disconnected. Data now stays on this device only.', 'success'); }
-  FT.setConn(url, $('key').value); st('s1', 'Testing…', 'loading');
+  FT.setConn(url); st('s1', 'Testing…', 'loading');
   try {
     await FT.refresh(); cfg = FT.clone(FT.config()); draw(); FT.header('settings.html');
     st('s1', 'Connected ✓  ' + FT.all().length + ' transactions in the shared sheet.', 'success');
-  } catch (e) { st('s1', 'Could not connect: ' + e.message + '. Check the URL, the passcode, and that the web app is deployed to "Anyone".', 'error'); }
+  } catch (e) { st('s1', 'Could not connect: ' + e.message + '. Check the URL and that the web app is deployed to "Anyone".', 'error'); }
 };
 $('copyLink').onclick = async () => {
   const c = FT.conn(); if (!c) return st('s1', 'Save the connection first.', 'error');
   const other = cfg.people.find(p => p !== FT.user()) || '';
-  const link = location.origin + location.pathname.replace('settings.html', 'index.html') + '#u=' + encodeURIComponent(c.url) + '&k=' + encodeURIComponent(c.key) + (other ? '&n=' + encodeURIComponent(other) : '');
+  const link = location.origin + location.pathname.replace('settings.html', 'index.html') + '#u=' + encodeURIComponent(c.url) + (other ? '&n=' + encodeURIComponent(other) : '');
   try { await navigator.clipboard.writeText(link); st('s1', 'Link copied' + (other ? ' (it sets the device up as ' + other + ')' : '') + '. Send it privately, e.g. on WhatsApp.', 'success'); }
   catch (e) { prompt('Copy this link:', link); }
 };
