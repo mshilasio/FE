@@ -202,6 +202,7 @@ function parseBank(raw) {
     return raw.split(/\n+/).map(s => s.replace(/\s+/g, ' ').trim()).filter(Boolean).map(parseBankOne).filter(Boolean);
 }
 function parseBankOne(msg) {
+    if (/\b[A-Z0-9]{10}\s+Confirmed/i.test(msg)) return null; // skip M-PESA messages
     let amount = 0, recipient = '', date = todayISO(), time = '', method = 'Bank', balance = 0, account = '';
     // Pattern 1: Card transaction - "a transaction of KES X was made on card ending Y at MERCHANT on DATE"
     let m = msg.match(/transaction\s+of\s+(?:KES|Ksh)\s?([\d,]+(?:\.\d+)?)\s+was\s+made\s+on\s+card\s+ending\s+(\d+)\s+at\s+(.+?)\s+on\s+(\d{4}-\d{2}-\d{2}|\d{1,2}\/\d{1,2}\/\d{2,4})/i);
